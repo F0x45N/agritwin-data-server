@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  # 1. Amazon DynamoDB (Local Container for Offline/Cloud-Ready Development)
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: agritwin-dynamodb
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./docker/dynamodb:/home/dynamodblocal/data
+    working_dir: /home/dynamodblocal
+    restart: unless-stopped
+
+  # 2. DynamoDB Web Admin UI (Inspect tables at http://localhost:8002)
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: agritwin-dynamodb-admin
+    ports:
+      - "8002:8001"
+    environment:
+      - DYNAMO_ENDPOINT=http://dynamodb-local:8000
+      - AWS_REGION=ap-southeast-1
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+    depends_on:
+      - dynamodb-local
+    restart: unless-stopped
+
+  # 3. Cloud Service Provider API + Reinforcement Learning Advisor (http://localhost:8000)
+  agritwin-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agritwin-cloud-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - AWS_REGION=ap-southeast-1
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - FARM_ID=MaeFahLuang_Greenhouse_01
+    depends_on:
+      - dynamodb-local
+    restart: unless-stopped
+
+  # 4. Simulated Physical Greenhouse IoT Sensor Node (Streams telemetry & executes valve commands)
+  iot-sensor-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agritwin-iot-simulator
+    command: ["python", "-u", "simulator/iot_sensor_simulator.py"]
+    environment:
+      - API_BASE_URL=http://agritwin-api:8000
+      - FARM_ID=MaeFahLuang_Greenhouse_01
+      - TICK_INTERVAL_SECONDS=3.0
+    depends_on:
+      - agritwin-api
+    restart: unless-stopped
